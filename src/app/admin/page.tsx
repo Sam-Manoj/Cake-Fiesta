@@ -15,7 +15,7 @@ interface Order {
   order_items: { 
     quantity: number; 
     unit_price: number;
-    cake_variants?: { weight: string; church_rate: number };
+    cake_variants?: { weight: string; church_rate: number; egg_type: string };
     cakes: { name: string; category?: string };
   }[];
 }
@@ -143,7 +143,7 @@ export default function AdminDashboard() {
           quantity,
           unit_price,
           cakes (name),
-          cake_variants (weight, church_rate)
+          cake_variants (weight, church_rate, egg_type)
         )
       `)
       .order("created_at", { ascending: false });
@@ -179,7 +179,7 @@ export default function AdminDashboard() {
 
   const handleUpdateStatus = async (orderId: string, newStatus: string) => {
     if (newStatus === 'cancelled') {
-      const confirmed = window.confirm("Are you sure you want to cancel the order...?");
+      const confirmed = window.confirm("Are you sure you want to cancel this order?");
       if (!confirmed) return;
     }
 
@@ -213,7 +213,8 @@ export default function AdminDashboard() {
       ?.map((item, index) => {
         const cakeName = item.cakes?.name || "Cake";
         const variantWeight = item.cake_variants?.weight || "Standard";
-        return `${index + 1}. ${cakeName} | ${variantWeight} | Qty: ${item.quantity}`;
+        const eggType = item.cake_variants?.egg_type ? ` [${item.cake_variants.egg_type}]` : "";
+        return `${index + 1}. ${cakeName} | ${variantWeight}${eggType} | Qty: ${item.quantity}`;
       })
       .join("\n");
 
@@ -245,12 +246,13 @@ export default function AdminDashboard() {
       return;
     }
 
-    const headers = ["Order ID", "Customer Name", "Phone", "Batch Name", "Cutoff Date", "Payment Mode", "Cake Name", "Weight", "Quantity", "Unit Price (INR)", "Total Price (INR)", "Status", "Updated By", "Created At"];
+    const headers = ["Order ID", "Customer Name", "Phone", "Batch Name", "Cutoff Date", "Payment Mode", "Cake Name", "Weight", "Egg Type", "Quantity", "Unit Price (INR)", "Total Price (INR)", "Status", "Updated By", "Created At"];
     const rows: string[][] = [];
 
     filteredOrders.forEach(ord => {
       ord.order_items?.forEach(item => {
         const weight = item.cake_variants?.weight || "Standard";
+        const eggType = item.cake_variants?.egg_type || "Egg";
         rows.push([
           ord.id,
           `"${ord.customers?.name || "Guest"}"`,
@@ -260,6 +262,7 @@ export default function AdminDashboard() {
           `"${ord.payment_mode || "Cash"}"`,
           `"${item.cakes?.name || "Unknown Cake"}"`,
           `"${weight}"`,
+          `"${eggType}"`,
           String(item.quantity),
           item.unit_price.toFixed(2),
           (item.unit_price * item.quantity).toFixed(2),
@@ -286,15 +289,13 @@ export default function AdminDashboard() {
       ord.order_items?.forEach(item => {
         const weight = item.cake_variants?.weight || "";
         const cakeName = item.cakes?.name || "";
-        const isSlice = weight.toLowerCase().includes("slice") || cakeName.toLowerCase().includes("slice");
+        const eggType = item.cake_variants?.egg_type || "Egg";
+        const isSlice = weight.toLowerCase().includes("400") || weight.toLowerCase().includes("slice") || cakeName.toLowerCase().includes("slice");
         
         if (isSlice) {
-          const isEggless = weight.toLowerCase().includes("eggless") || cakeName.toLowerCase().includes("eggless");
-          const eggStatus = isEggless ? "Eggless" : "With Egg";
-
-          const key = `${cakeName}_${eggStatus}`;
+          const key = `${cakeName}_${eggType}`;
           if (!aggregateMap[key]) {
-            aggregateMap[key] = { cakeName, eggStatus, totalQty: 0 };
+            aggregateMap[key] = { cakeName, eggStatus: eggType, totalQty: 0 };
           }
           aggregateMap[key].totalQty += item.quantity;
         }
@@ -326,38 +327,39 @@ export default function AdminDashboard() {
       return;
     }
 
-    const aggregateMap: Record<string, { cakeName: string; numericWeight: string; totalQty: number }> = {};
+    const aggregateMap: Record<string, { cakeName: string; numericWeight: string; eggStatus: string; totalQty: number }> = {};
 
     filteredOrders.forEach(ord => {
       if (ord.status === 'cancelled') return;
       ord.order_items?.forEach(item => {
         const weightStr = item.cake_variants?.weight || "";
         const cakeName = item.cakes?.name || "";
+        const eggType = item.cake_variants?.egg_type || "Egg";
         const weightLower = weightStr.toLowerCase();
-        const cakeNameLower = cakeName.toLowerCase();
 
-        const isRoundOrSquare = weightLower.includes("round") || weightLower.includes("square") || cakeNameLower.includes("round") || cakeNameLower.includes("square") || (!weightLower.includes("slice") && !cakeNameLower.includes("slice"));
+        const isRoundOrSquare = !weightLower.includes("400") && !weightLower.includes("slice");
         
         if (isRoundOrSquare) {
-          const weightMatch = weightStr.match(/\d+/);
+          const weightMatch = weightStr.match(/\d+g?/i);
           const numericWeight = weightMatch ? weightMatch[0] : weightStr;
 
-          const key = `${cakeName}_${numericWeight}`;
+          const key = `${cakeName}_${numericWeight}_${eggType}`;
           if (!aggregateMap[key]) {
-            aggregateMap[key] = { cakeName, numericWeight, totalQty: 0 };
+            aggregateMap[key] = { cakeName, numericWeight, eggStatus: eggType, totalQty: 0 };
           }
           aggregateMap[key].totalQty += item.quantity;
         }
       });
     });
 
-    const headers = ["Cake Name", "Weight", "Total Quantity"];
+    const headers = ["Cake Name", "Weight", "Egg Type", "Total Quantity"];
     const rows: string[][] = [];
 
     Object.values(aggregateMap).forEach(item => {
       rows.push([
         `"${item.cakeName}"`,
         `"${item.numericWeight}"`,
+        `"${item.eggStatus}"`,
         String(item.totalQty)
       ]);
     });
@@ -376,33 +378,31 @@ export default function AdminDashboard() {
       return;
     }
 
-    const cakeMap: Record<string, { weight: string; totalQty: number; totalMRP: number; totalChurchRate: number }> = {};
+    const cakeMap: Record<string, { weight: string; eggType: string; totalQty: number; totalMRP: number; totalChurchRate: number }> = {};
     
     filteredOrders.forEach(ord => {
       if (ord.status === 'cancelled') return;
       ord.order_items?.forEach(item => {
         const cakeName = item.cakes?.name || "Unknown Cake";
         const weight = item.cake_variants?.weight || "Standard";
+        const eggType = item.cake_variants?.egg_type || "Egg";
         const churchRate = item.cake_variants?.church_rate || item.unit_price * 0.85;
         
-        const weightLower = weight.toLowerCase();
-        const cakeNameLower = cakeName.toLowerCase();
-
-        const isEggless = weightLower.includes("eggless") || cakeNameLower.includes("eggless");
+        const isEggless = eggType.toLowerCase() === "eggless";
         const isEgg = !isEggless;
         if (profitEggFilter === "egg" && !isEgg) return;
         if (profitEggFilter === "eggless" && !isEggless) return;
 
-        const isSlice = weightLower.includes("slice") || cakeNameLower.includes("slice");
+        const isSlice = weight.toLowerCase().includes("400") || weight.toLowerCase().includes("slice");
         const isRoundSquare = !isSlice;
         if (profitTypeFilter === "slice" && !isSlice) return;
         if (profitTypeFilter === "round_square" && !isRoundSquare) return;
 
-        if (profitWeightFilter !== "all" && !weightLower.includes(profitWeightFilter.toLowerCase())) return;
+        if (profitWeightFilter !== "all" && !weight.toLowerCase().includes(profitWeightFilter.toLowerCase())) return;
 
-        const key = `${cakeName}_${weight}`;
+        const key = `${cakeName}_${weight}_${eggType}`;
         if (!cakeMap[key]) {
-          cakeMap[key] = { weight, totalQty: 0, totalMRP: 0, totalChurchRate: 0 };
+          cakeMap[key] = { weight, eggType, totalQty: 0, totalMRP: 0, totalChurchRate: 0 };
         }
         cakeMap[key].totalQty += item.quantity;
         cakeMap[key].totalMRP += item.unit_price * item.quantity;
@@ -416,13 +416,15 @@ export default function AdminDashboard() {
       return;
     }
 
-    const headers = ["Cake Name", "Weight / Variant", "Total Quantity", "Total Storefront MRP (INR)", "Total Church Rate (INR)", "Estimated Profit (INR)"];
+    const headers = ["Cake Name", "Weight / Variant", "Egg Type", "Total Quantity", "Total Storefront MRP (INR)", "Total Church Rate (INR)", "Estimated Profit (INR)"];
     const rows = entries.map(([key, stats]) => {
-      const cakeName = key.substring(0, key.lastIndexOf("_"));
+      const parts = key.split("_");
+      const cakeName = parts[0];
       const profit = stats.totalMRP - stats.totalChurchRate;
       return [
         `"${cakeName}"`,
         `"${stats.weight}"`,
+        `"${stats.eggType}"`,
         String(stats.totalQty),
         stats.totalMRP.toFixed(2),
         stats.totalChurchRate.toFixed(2),
@@ -447,14 +449,14 @@ export default function AdminDashboard() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-cream flex items-center justify-center p-4">
-        <div className="bg-white border border-border rounded-2xl max-w-md w-full p-8 shadow-md space-y-6">
+      <div className="min-h-screen bg-[#FFFBE9] flex items-center justify-center p-4">
+        <div className="bg-white border border-[#562400]/10 rounded-2xl max-w-md w-full p-8 shadow-md space-y-6">
           <div className="text-center space-y-2">
-            <div className="w-12 h-12 rounded-full bg-accent/10 text-accent flex items-center justify-center mx-auto">
+            <div className="w-12 h-12 rounded-full bg-[#044529]/10 text-[#044529] flex items-center justify-center mx-auto">
               <Lock className="w-6 h-6" />
             </div>
-            <h2 className="font-serif text-2xl font-medium text-foreground">Staff Portal Login</h2>
-            <p className="text-xs text-muted">Enter database credentials to manage orders and view reports.</p>
+            <h2 className="font-serif text-2xl font-medium text-[#562400]">Staff Portal Login</h2>
+            <p className="text-xs text-[#562400]/60">Enter database credentials to manage orders and view reports.</p>
           </div>
 
           {loginError && (
@@ -465,29 +467,29 @@ export default function AdminDashboard() {
 
           <form onSubmit={handleAdminLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-foreground mb-1">Username</label>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-[#562400] mb-1">Username</label>
               <input
                 type="text"
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full bg-secondary/20 border border-border rounded-lg p-2.5 text-sm focus:outline-none"
+                className="w-full bg-[#FFECC5]/30 border border-[#562400]/15 rounded-lg p-2.5 text-sm focus:outline-none"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-foreground mb-1">Password</label>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-[#562400] mb-1">Password</label>
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-secondary/20 border border-border rounded-lg p-2.5 text-sm focus:outline-none"
+                className="w-full bg-[#FFECC5]/30 border border-[#562400]/15 rounded-lg p-2.5 text-sm focus:outline-none"
               />
             </div>
             <button
               type="submit"
               disabled={loginLoading}
-              className="w-full py-3 rounded-xl font-medium text-sm bg-primary text-primary-foreground hover:bg-primary/95 transition-colors shadow-xs disabled:opacity-50"
+              className="w-full py-3 rounded-xl font-medium text-sm bg-[#8F0500] text-[#FFFBE9] hover:bg-[#720400] transition-colors shadow-xs disabled:opacity-50"
             >
               {loginLoading ? "Authenticating..." : "Sign In to Admin"}
             </button>
@@ -498,18 +500,18 @@ export default function AdminDashboard() {
   }
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center bg-cream text-muted">Loading Admin Portal...</div>;
+    return <div className="min-h-screen flex items-center justify-center bg-[#FFFBE9] text-[#562400]/60">Loading Admin Portal...</div>;
   }
 
   return (
-    <div className="min-h-screen bg-cream text-foreground pb-20 relative">
+    <div className="min-h-screen bg-[#FFFBE9] text-[#562400] pb-20 relative">
       {/* Password Change Modal */}
       {showPasswordModal && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-border rounded-2xl max-w-sm w-full p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
+          <div className="bg-white border border-[#562400]/10 rounded-2xl max-w-sm w-full p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[#562400]/10 pb-3">
               <h3 className="font-serif text-xl font-medium">Change Password</h3>
-              <button onClick={() => setShowPasswordModal(false)} className="text-muted hover:text-foreground">✕</button>
+              <button onClick={() => setShowPasswordModal(false)} className="text-[#562400]/60 hover:text-[#562400]">✕</button>
             </div>
             {passwordMessage && (
               <div className={`p-3 rounded-lg text-xs ${passwordMessage.includes('success') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>
@@ -524,7 +526,7 @@ export default function AdminDashboard() {
                   required
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full bg-secondary/20 border border-border rounded-lg p-2.5 text-sm focus:outline-none"
+                  className="w-full bg-[#FFECC5]/30 border border-[#562400]/15 rounded-lg p-2.5 text-sm focus:outline-none"
                 />
               </div>
               <div>
@@ -534,12 +536,12 @@ export default function AdminDashboard() {
                   required
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full bg-secondary/20 border border-border rounded-lg p-2.5 text-sm focus:outline-none"
+                  className="w-full bg-[#FFECC5]/30 border border-[#562400]/15 rounded-lg p-2.5 text-sm focus:outline-none"
                 />
               </div>
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowPasswordModal(false)} className="flex-1 py-2 rounded-xl bg-secondary text-foreground text-xs font-medium">Cancel</button>
-                <button type="submit" className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90">Update</button>
+                <button type="button" onClick={() => setShowPasswordModal(false)} className="flex-1 py-2 rounded-xl bg-[#FFECC5] text-[#562400] text-xs font-medium">Cancel</button>
+                <button type="submit" className="flex-1 py-2 rounded-xl bg-[#8F0500] text-[#FFFBE9] text-xs font-medium hover:bg-[#720400]">Update</button>
               </div>
             </form>
           </div>
@@ -549,14 +551,14 @@ export default function AdminDashboard() {
       {/* Screenshot Preview Modal */}
       {selectedScreenshotUrl && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-border rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
+          <div className="bg-white border border-[#562400]/10 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[#562400]/10 pb-3">
               <h3 className="font-serif text-xl font-medium">UPI Payment Screenshot</h3>
-              <button onClick={() => setSelectedScreenshotUrl(null)} className="rounded-full p-1.5 hover:bg-secondary">
+              <button onClick={() => setSelectedScreenshotUrl(null)} className="rounded-full p-1.5 hover:bg-[#FFECC5]">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="flex items-center justify-center bg-secondary/20 rounded-xl p-3 max-h-[70vh] overflow-hidden">
+            <div className="flex items-center justify-center bg-[#FFECC5]/30 rounded-xl p-3 max-h-[70vh] overflow-hidden">
               <img
                 src={selectedScreenshotUrl}
                 alt="Payment Proof"
@@ -568,7 +570,7 @@ export default function AdminDashboard() {
                 href={selectedScreenshotUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-4 py-2 rounded-xl bg-secondary text-foreground text-xs font-medium hover:bg-secondary/80 transition-colors"
+                className="px-4 py-2 rounded-xl bg-[#FFECC5] text-[#562400] text-xs font-medium hover:bg-[#FFECC5]/80 transition-colors"
               >
                 Open Full Image in New Tab
               </a>
@@ -578,31 +580,25 @@ export default function AdminDashboard() {
       )}
 
       {/* Header */}
-      <header className="bg-white border-b border-border sticky top-0 z-40">
+      <header className="bg-white border-b border-[#562400]/10 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div>
-            <h1 className="font-serif text-2xl font-medium">Cake Fiesta Staff Portal</h1>
-            <p className="text-xs text-muted">Logged in as: <strong className="text-foreground">{currentAdminUser}</strong></p>
+            <h1 className="font-serif text-2xl font-medium text-[#044529]">Cake Fiesta Staff Portal</h1>
+            <p className="text-xs text-[#562400]/60">Logged in as: <strong className="text-[#562400]">{currentAdminUser}</strong></p>
           </div>
           <div className="flex items-center gap-3">
-            <a
-              href="/admin/analytics"
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#044529] text-[#FFFBE9] text-xs font-semibold hover:bg-[#033620] transition-colors shadow-xs"
-            >
-              Analytics
-            </a>
             <button
               onClick={() => setShowPasswordModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-white text-xs font-medium hover:bg-secondary transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#562400]/15 bg-white text-xs font-medium hover:bg-[#FFECC5]/40 transition-colors"
             >
-              <KeyRound className="w-3.5 h-3.5 text-accent" /> Password
+              <KeyRound className="w-3.5 h-3.5 text-[#8F0500]" /> Password
             </button>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-accent/10 text-accent text-xs font-semibold">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#044529]/10 text-[#044529] text-xs font-semibold">
               <ShieldCheck className="w-4 h-4" /> Authorized
             </span>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border bg-white text-xs font-medium hover:bg-red-50 hover:text-red-600 transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#562400]/15 bg-white text-xs font-medium hover:bg-red-50 hover:text-red-600 transition-colors"
             >
               <LogOut className="w-3.5 h-3.5" /> Logout
             </button>
@@ -613,26 +609,26 @@ export default function AdminDashboard() {
       {/* Main Dashboard */}
       <main className="max-w-7xl mx-auto px-6 py-10 space-y-8">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="bg-white border border-border p-6 rounded-2xl shadow-xs space-y-1">
-            <span className="text-xs font-semibold text-muted uppercase tracking-wider flex items-center gap-1.5">
-              <TrendingUp className="w-4 h-4 text-accent" /> Filtered Revenue (MRP)
+          <div className="bg-white border border-[#562400]/10 p-6 rounded-2xl shadow-xs space-y-1">
+            <span className="text-xs font-semibold text-[#562400]/60 uppercase tracking-wider flex items-center gap-1.5">
+              <TrendingUp className="w-4 h-4 text-[#8F0500]" /> Filtered Revenue (MRP)
             </span>
-            <p className="font-sans font-bold text-3xl tabular-nums text-foreground">₹{totalStorefrontRevenue.toFixed(2)}</p>
+            <p className="font-sans font-bold text-3xl tabular-nums text-[#562400]">₹{totalStorefrontRevenue.toFixed(2)}</p>
           </div>
-          <div className="bg-white border border-border p-6 rounded-2xl shadow-xs space-y-1">
-            <span className="text-xs font-semibold text-muted uppercase tracking-wider flex items-center gap-1.5">
-              <Package className="w-4 h-4 text-accent" /> Filtered Orders Count
+          <div className="bg-white border border-[#562400]/10 p-6 rounded-2xl shadow-xs space-y-1">
+            <span className="text-xs font-semibold text-[#562400]/60 uppercase tracking-wider flex items-center gap-1.5">
+              <Package className="w-4 h-4 text-[#8F0500]" /> Filtered Orders Count
             </span>
-            <p className="font-sans font-bold text-3xl tabular-nums text-foreground">{totalOrdersCount}</p>
+            <p className="font-sans font-bold text-3xl tabular-nums text-[#562400]">{totalOrdersCount}</p>
           </div>
-          <div className="bg-white border border-border p-6 rounded-2xl shadow-xs space-y-1">
-            <span className="text-xs font-semibold text-muted uppercase tracking-wider flex items-center gap-1.5">
+          <div className="bg-white border border-[#562400]/10 p-6 rounded-2xl shadow-xs space-y-1">
+            <span className="text-xs font-semibold text-[#562400]/60 uppercase tracking-wider flex items-center gap-1.5">
               <Clock className="w-4 h-4 text-yellow-600" /> Pending Verification
             </span>
             <p className="font-sans font-bold text-3xl tabular-nums text-yellow-600">{pendingCount}</p>
           </div>
-          <div className="bg-white border border-border p-6 rounded-2xl shadow-xs space-y-1">
-            <span className="text-xs font-semibold text-muted uppercase tracking-wider flex items-center gap-1.5">
+          <div className="bg-white border border-[#562400]/10 p-6 rounded-2xl shadow-xs space-y-1">
+            <span className="text-xs font-semibold text-[#562400]/60 uppercase tracking-wider flex items-center gap-1.5">
               <CheckCircle className="w-4 h-4 text-green-600" /> Verified Orders
             </span>
             <p className="font-sans font-bold text-3xl tabular-nums text-green-600">{verifiedCount}</p>
@@ -640,17 +636,17 @@ export default function AdminDashboard() {
         </div>
 
         {/* Filterable Profit CSV Generator Section */}
-        <div className="bg-white border border-border rounded-2xl shadow-xs p-6 space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-4">
+        <div className="bg-white border border-[#562400]/10 rounded-2xl shadow-xs p-6 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#562400]/10 pb-4">
             <div>
               <h3 className="font-serif text-xl font-medium flex items-center gap-2">
-                <FileSpreadsheet className="w-5 h-5 text-accent" /> Advanced Filterable Profit CSV Generator
+                <FileSpreadsheet className="w-5 h-5 text-[#8F0500]" /> Advanced Filterable Profit CSV Generator
               </h3>
-              <p className="text-xs text-muted">Select specific parameters to generate a custom profit and quantity summary CSV report.</p>
+              <p className="text-xs text-[#562400]/60">Select specific parameters to generate a custom profit and quantity summary CSV report.</p>
             </div>
             <button
               onClick={exportFilteredProfitCSV}
-              className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/95 transition-colors shadow-xs flex items-center gap-2"
+              className="px-4 py-2.5 rounded-xl bg-[#8F0500] text-[#FFFBE9] text-xs font-medium hover:bg-[#720400] transition-colors shadow-xs flex items-center gap-2"
             >
               <Download className="w-4 h-4" /> Download Filtered Profit CSV
             </button>
@@ -658,11 +654,11 @@ export default function AdminDashboard() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-foreground mb-1">Egg / Eggless</label>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-[#562400] mb-1">Egg / Eggless</label>
               <select
                 value={profitEggFilter}
                 onChange={(e) => setProfitEggFilter(e.target.value)}
-                className="w-full bg-secondary/20 border border-border rounded-lg p-2.5 text-xs font-medium focus:outline-none"
+                className="w-full bg-[#FFECC5]/30 border border-[#562400]/15 rounded-lg p-2.5 text-xs font-medium focus:outline-none"
               >
                 <option value="all">All (Egg & Eggless)</option>
                 <option value="egg">With Egg Only</option>
@@ -671,11 +667,11 @@ export default function AdminDashboard() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-foreground mb-1">Cake Category / Type</label>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-[#562400] mb-1">Cake Category / Type</label>
               <select
                 value={profitTypeFilter}
                 onChange={(e) => setProfitTypeFilter(e.target.value)}
-                className="w-full bg-secondary/20 border border-border rounded-lg p-2.5 text-xs font-medium focus:outline-none"
+                className="w-full bg-[#FFECC5]/30 border border-[#562400]/15 rounded-lg p-2.5 text-xs font-medium focus:outline-none"
               >
                 <option value="all">All Types (Slices & Round/Square)</option>
                 <option value="slice">Slice Cakes Only</option>
@@ -684,11 +680,11 @@ export default function AdminDashboard() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-foreground mb-1">Weight / Size</label>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-[#562400] mb-1">Weight / Size</label>
               <select
                 value={profitWeightFilter}
                 onChange={(e) => setProfitWeightFilter(e.target.value)}
-                className="w-full bg-secondary/20 border border-border rounded-lg p-2.5 text-xs font-medium focus:outline-none"
+                className="w-full bg-[#FFECC5]/30 border border-[#562400]/15 rounded-lg p-2.5 text-xs font-medium focus:outline-none"
               >
                 <option value="all">All Weights</option>
                 <option value="400g">400g (Slice)</option>
@@ -701,43 +697,43 @@ export default function AdminDashboard() {
         </div>
 
         {/* Orders Table Section */}
-        <div className="bg-white border border-border rounded-2xl shadow-xs p-6 space-y-6">
-          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-border pb-4">
+        <div className="bg-white border border-[#562400]/10 rounded-2xl shadow-xs p-6 space-y-6">
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-[#562400]/10 pb-4">
             <div>
               <h3 className="font-serif text-xl font-medium">Customer Orders & Reports</h3>
-              <p className="text-xs text-muted">Filter orders by batch and status, verify payments, or export customized CSVs.</p>
+              <p className="text-xs text-[#562400]/60">Filter orders by batch and status, verify payments, or export customized CSVs.</p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <select value={filterBatch} onChange={(e) => setFilterBatch(e.target.value)} className="bg-secondary/20 border border-border rounded-lg p-2 text-xs font-medium focus:outline-none">
+              <select value={filterBatch} onChange={(e) => setFilterBatch(e.target.value)} className="bg-[#FFECC5]/30 border border-[#562400]/15 rounded-lg p-2 text-xs font-medium focus:outline-none">
                 <option value="all">All Batches</option>
                 <option value="Batch 1 (Pre-Christmas)">Batch 1 (Pre-Christmas)</option>
                 <option value="Batch 2 (Christmas & New Year)">Batch 2 (Christmas & New Year)</option>
               </select>
-              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-secondary/20 border border-border rounded-lg p-2 text-xs font-medium focus:outline-none">
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-[#FFECC5]/30 border border-[#562400]/15 rounded-lg p-2 text-xs font-medium focus:outline-none">
                 <option value="all">All Statuses</option>
                 <option value="pending">Pending</option>
                 <option value="verified">Verified</option>
                 <option value="cancelled">Cancelled</option>
               </select>
-              <button onClick={exportOrdersCSV} className="px-3 py-2 rounded-lg bg-secondary text-foreground text-xs font-medium hover:bg-secondary/80 transition-colors shadow-xs flex items-center gap-1.5">
+              <button onClick={exportOrdersCSV} className="px-3 py-2 rounded-lg bg-[#FFECC5] text-[#562400] text-xs font-medium hover:bg-[#FFECC5]/80 transition-colors shadow-xs flex items-center gap-1.5">
                 <Download className="w-3.5 h-3.5" /> All Orders CSV
               </button>
-              <button onClick={exportSlicesCSV} className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/95 transition-colors shadow-xs flex items-center gap-1.5">
+              <button onClick={exportSlicesCSV} className="px-3 py-2 rounded-lg bg-[#044529] text-[#FFFBE9] text-xs font-medium hover:bg-[#033620] transition-colors shadow-xs flex items-center gap-1.5">
                 <Download className="w-3.5 h-3.5" /> Slices Summary CSV
               </button>
-              <button onClick={exportRoundSquareCSV} className="px-3 py-2 rounded-lg bg-accent text-primary-foreground text-xs font-medium hover:bg-accent/90 transition-colors shadow-xs flex items-center gap-1.5">
+              <button onClick={exportRoundSquareCSV} className="px-3 py-2 rounded-lg bg-[#8F0500] text-[#FFFBE9] text-xs font-medium hover:bg-[#720400] transition-colors shadow-xs flex items-center gap-1.5">
                 <Download className="w-3.5 h-3.5" /> Round & Square Summary CSV
               </button>
             </div>
           </div>
 
           {filteredOrders.length === 0 ? (
-            <p className="text-center text-muted py-12">No orders found matching the selected filters.</p>
+            <p className="text-center text-[#562400]/60 py-12">No orders found matching the selected filters.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-sm">
                 <thead>
-                  <tr className="border-b border-border bg-secondary/20 text-xs uppercase tracking-wider text-muted">
+                  <tr className="border-b border-[#562400]/10 bg-[#FFECC5]/30 text-xs uppercase tracking-wider text-[#562400]/60">
                     <th className="p-3.5 font-semibold">Order ID / Date</th>
                     <th className="p-3.5 font-semibold">Customer</th>
                     <th className="p-3.5 font-semibold">Batch & Payment</th>
@@ -747,28 +743,28 @@ export default function AdminDashboard() {
                     <th className="p-3.5 font-semibold text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody className="divide-y divide-[#562400]/10">
                   {filteredOrders.map((ord) => (
-                    <tr key={ord.id} className="hover:bg-secondary/5 transition-colors">
+                    <tr key={ord.id} className="hover:bg-[#FFECC5]/20 transition-colors">
                       <td className="p-3.5 font-mono text-xs">
                         <span className="font-semibold">{ord.id.slice(0, 8)}</span>
-                        <span className="text-muted block">{new Date(ord.created_at).toLocaleDateString()}</span>
+                        <span className="text-[#562400]/60 block">{new Date(ord.created_at).toLocaleDateString()}</span>
                       </td>
                       <td className="p-3.5">
                         <span className="font-medium block">{ord.customers?.name || "Guest"}</span>
-                        <span className="text-xs text-muted">+91 {ord.customers?.phone}</span>
+                        <span className="text-xs text-[#562400]/60">+91 {ord.customers?.phone}</span>
                       </td>
                       <td className="p-3.5 text-xs space-y-1.5">
                         <span className="font-medium block">{ord.batches?.name || "Unassigned"}</span>
                         <div className="flex items-center gap-1.5">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-secondary/50 text-foreground font-semibold text-[10px] uppercase">
-                            <CreditCard className="w-3 h-3 text-accent" /> {ord.payment_mode || "Cash"}
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FFECC5] text-[#562400] font-semibold text-[10px] uppercase">
+                            <CreditCard className="w-3 h-3 text-[#8F0500]" /> {ord.payment_mode || "Cash"}
                           </span>
                           {ord.payment_mode === "UPI" && (
                             <button
                               onClick={() => handleViewScreenshot(ord.id)}
                               disabled={screenshotLoading}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-primary font-semibold text-[10px] hover:bg-primary/20 transition-colors"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#044529]/10 text-[#044529] font-semibold text-[10px] hover:bg-[#044529]/20 transition-colors"
                             >
                               <Eye className="w-3 h-3" /> Proof
                             </button>
@@ -776,12 +772,25 @@ export default function AdminDashboard() {
                         </div>
                       </td>
                       <td className="p-3.5 text-xs">
-                        <ul className="space-y-0.5">
-                          {ord.order_items?.map((item, idx) => (
-                            <li key={idx} className="text-muted">
-                              {item.cakes?.name} ({item.cake_variants?.weight || "Standard"}) × {item.quantity}
-                            </li>
-                          ))}
+                        <ul className="space-y-1">
+                          {ord.order_items?.map((item, idx) => {
+                            const isEggless = item.cake_variants?.egg_type && item.cake_variants.egg_type.toLowerCase() === "eggless";
+                            return (
+                              <li key={idx} className="text-[#562400]/80">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-semibold text-[#044529]">{item.cakes?.name}</span>
+                                  {item.cake_variants?.egg_type && (
+                                    <span className={`rounded px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider ${
+                                      isEggless ? "bg-[#044529]/10 text-[#044529]" : "bg-[#8F0500]/10 text-[#8F0500]"
+                                    }`}>
+                                      {item.cake_variants.egg_type}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[11px] text-[#562400]/60">{item.cake_variants?.weight || "Standard"} × {item.quantity}</span>
+                              </li>
+                            );
+                          })}
                         </ul>
                       </td>
                       <td className="p-3.5 font-sans font-bold tabular-nums">
@@ -797,19 +806,19 @@ export default function AdminDashboard() {
                         }`}>
                           {ord.status}
                         </span>
-                        <span className="text-[11px] text-muted block mt-1">
-                          By: <strong className="text-foreground">{ord.updated_by || "System"}</strong>
+                        <span className="text-[11px] text-[#562400]/60 block mt-1">
+                          By: <strong className="text-[#562400]">{ord.updated_by || "System"}</strong>
                         </span>
                       </td>
                       <td className="p-3.5 text-right">
                         <div className="flex items-center justify-end gap-2">
                           {ord.status !== 'verified' ? (
-                            <button onClick={() => handleUpdateStatus(ord.id, 'verified')} className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/95 transition-colors shadow-xs">
+                            <button onClick={() => handleUpdateStatus(ord.id, 'verified')} className="px-3 py-1.5 rounded-lg bg-[#8F0500] text-[#FFFBE9] text-xs font-medium hover:bg-[#720400] transition-colors shadow-xs">
                               Verify
                             </button>
                           ) : (
                             <>
-                              <button onClick={() => handleUpdateStatus(ord.id, 'pending')} className="px-3 py-1.5 rounded-lg bg-secondary text-foreground text-xs font-medium hover:bg-secondary/80 transition-colors flex items-center gap-1">
+                              <button onClick={() => handleUpdateStatus(ord.id, 'pending')} className="px-3 py-1.5 rounded-lg bg-[#FFECC5] text-[#562400] text-xs font-medium hover:bg-[#FFECC5]/80 transition-colors flex items-center gap-1">
                                 <XCircle className="w-3.5 h-3.5 text-red-500" /> Unverify
                               </button>
                               <button

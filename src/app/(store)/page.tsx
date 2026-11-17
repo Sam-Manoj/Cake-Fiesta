@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { ShoppingBag, Phone, User, Calendar, Layers, Plus, Minus, Check, LogOut, ArrowRight, Trash2, History, X, Sparkles, Menu, Filter, CreditCard, Upload } from "lucide-react";
+import { ShoppingBag, Phone, User, Calendar, Layers, Plus, Minus, Check, LogOut, ArrowRight, Trash2, History, X, Menu, Filter, CreditCard, Upload } from "lucide-react";
 
 export const cakeImageMap: Record<string, string> = {
   "christmas-cake-hero": "/christmas-cake-hero.png",
@@ -26,6 +26,7 @@ interface Variant {
   id: string;
   weight: string;
   mrp: number;
+  egg_type: string;
 }
 
 interface Cake {
@@ -42,6 +43,7 @@ interface Batch {
   id: string;
   name: string;
   cutoff_date: string;
+  date?: string;
 }
 
 interface CartItem {
@@ -49,6 +51,7 @@ interface CartItem {
   cakeName: string;
   variantId: string;
   weight: string;
+  eggType: string;
   mrp: number;
   quantity: number;
 }
@@ -143,8 +146,12 @@ export default function StorefrontPage() {
     }
 
     async function fetchData() {
-      const { data: cakeData } = await supabase.from("cakes").select("*, cake_variants(id, weight, mrp)").order("name");
-      const { data: batchData } = await supabase.from("batches").select("*").eq("active", true).order("cutoff_date");
+      const { data: cakeData } = await supabase.from("cakes").select("*, cake_variants(id, weight, mrp, egg_type)").order("name");
+      const { data: batchData } = await supabase
+        .from("batches")
+        .select("*")
+        .eq("is_active", true)
+        .order("cutoff_date", { ascending: true });
       
       if (cakeData) setCakes(cakeData);
       if (batchData) {
@@ -167,7 +174,7 @@ export default function StorefrontPage() {
 
     setAuthLoading(true);
     try {
-      let { data: found } = await supabase.from("customers").select("*").eq("phone", cleanPhone).single();
+      let { data: found } = await supabase.from("customers").select("*").eq("phone", cleanPhone).maybeSingle();
       if (!found) {
         if (!isRegistering) {
           setIsRegistering(true);
@@ -212,14 +219,14 @@ export default function StorefrontPage() {
           total_amount,
           payment_mode,
           created_at,
-          batches (name, cutoff_date),
+          batches!orders_batch_id_fkey (name, cutoff_date, date),
           order_items (
             quantity,
             unit_price,
             cakes (name),
-            cake_variants (weight)
+            cake_variants (weight, egg_type)
           ),
-          payments (id, screenshot_url)
+          payments (id, screenshot_url, payment_mode)
         `)
         .eq("customer_id", customer.id)
         .order("created_at", { ascending: false });
@@ -227,7 +234,7 @@ export default function StorefrontPage() {
       if (error) throw error;
       setCustomerOrders(data || []);
     } catch (err: any) {
-      console.error(err);
+      console.error("Order history fetch error:", err);
       alert("Failed to load order history.");
     } finally {
       setHistoryLoading(false);
@@ -246,7 +253,7 @@ export default function StorefrontPage() {
       return { ...prev, [cakeId]: newCakeQtys };
     });
   };
-
+  
   const handleAddToCart = (cake: Cake) => {
     const cakeQtys = quantities[cake.id] || {};
     const newItems = [...cartItems];
@@ -263,6 +270,7 @@ export default function StorefrontPage() {
             cakeName: cake.name,
             variantId: v.id,
             weight: v.weight,
+            eggType: v.egg_type || "Egg",
             mrp: v.mrp,
             quantity: qty,
           });
@@ -331,7 +339,7 @@ export default function StorefrontPage() {
         }
       }
 
-      await supabase.from("payments").insert([{
+      const { error: paymentErr } = await supabase.from("payments").insert([{
         order_id: order.id,
         customer_id: customer.id,
         payment_mode: paymentMode,
@@ -339,6 +347,8 @@ export default function StorefrontPage() {
         amount: totalCartAmount,
         status: "pending"
       }]);
+
+      if (paymentErr) throw paymentErr;
 
       setCartItems([]);
       setPaymentScreenshot(null);
@@ -352,8 +362,17 @@ export default function StorefrontPage() {
 
   const filteredCakes = cakes.map((cake) => {
     const filteredVariants = cake.cake_variants.filter((v) => {
-      const matchesShape = selectedShape === "all" || v.weight.toLowerCase().includes(selectedShape.toLowerCase());
-      const matchesEgg = selectedEggType === "all" || v.weight.toLowerCase().includes(selectedEggType.toLowerCase());
+      const cakeNameLower = cake.name.toLowerCase();
+      let matchesShape = true;
+      if (selectedShape === "Square") {
+        matchesShape = cakeNameLower.includes("butterscotch") || cakeNameLower.includes("pineapple");
+      } else if (selectedShape === "Round") {
+        matchesShape = cakeNameLower.includes("plum") || cakeNameLower.includes("marble");
+      } else if (selectedShape === "Slice") {
+        matchesShape = v.weight.toLowerCase().includes("400");
+      }
+      
+      const matchesEgg = selectedEggType === "all" || (v.egg_type && v.egg_type.toLowerCase() === selectedEggType.toLowerCase());
       return matchesShape && matchesEgg;
     });
     return { ...cake, filteredVariants };
@@ -471,15 +490,27 @@ export default function StorefrontPage() {
                       Payment Mode: <span className="uppercase text-[#8F0500]">{ord.payment_mode || "UPI"}</span>
                     </div>
                     <div className="space-y-2 border-t border-[#562400]/10 pt-3">
-                      {ord.order_items?.map((item: any, idx: number) => (
-                        <div key={idx} className="flex justify-between gap-3 text-xs">
-                          <div>
-                            <span className="font-bold">{item.cakes?.name}</span>
-                            <span className="block text-[11px] text-[#562400]/60">{item.cake_variants?.weight || "Standard"}</span>
+                      {ord.order_items?.map((item: any, idx: number) => {
+                        const isEggless = item.cake_variants?.egg_type && item.cake_variants.egg_type.toLowerCase() === "eggless";
+                        return (
+                          <div key={idx} className="flex justify-between gap-3 text-xs">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold">{item.cakes?.name}</span>
+                                {item.cake_variants?.egg_type && (
+                                  <span className={`rounded px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider ${
+                                    isEggless ? "bg-[#044529]/10 text-[#044529]" : "bg-[#8F0500]/10 text-[#8F0500]"
+                                  }`}>
+                                    {item.cake_variants.egg_type}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="block text-[11px] text-[#562400]/60">{item.cake_variants?.weight || "Standard"}</span>
+                            </div>
+                            <span className="font-semibold tabular-nums">₹{(item.unit_price * item.quantity).toFixed(2)}</span>
                           </div>
-                          <span className="font-semibold tabular-nums">₹{(item.unit_price * item.quantity).toFixed(2)}</span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                     <div className="flex justify-between border-t border-[#562400]/10 pt-3 text-sm font-bold">
                       <span>Total amount</span>
@@ -494,43 +525,19 @@ export default function StorefrontPage() {
       )}
 
       <main>
-        {/* Responsive Christmas Bento Hero */}
         <section className="mx-auto max-w-[1600px] px-4 py-8 sm:px-6 md:px-10 lg:px-14 lg:py-12">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:grid-rows-[minmax(180px,1fr)_minmax(180px,1fr)] md:gap-4 lg:grid-rows-[220px_220px]">
-            {/* Cake Fiesta logo */}
             <div className="col-span-2 row-span-1 overflow-hidden rounded-2xl bg-[#ad010b] shadow-sm md:row-span-2">
-              <img
-                src="/6.png"
-                alt="Cake Fiesta Christmas logo"
-                className="aspect-square h-full w-full object-contain md:aspect-auto"
-              />
+              <img src="/6.png" alt="Cake Fiesta Christmas logo" className="aspect-square h-full w-full object-contain md:aspect-auto" />
             </div>
-
-            {/* Bulk orders promotion */}
             <div className="col-span-2 overflow-hidden rounded-2xl bg-[#005f2c] shadow-sm">
-              <img
-                src="/10.png"
-                alt="Bulk orders of tin-box packaging available"
-                className="aspect-[16/9] h-full w-full object-contain md:aspect-auto"
-              />
+              <img src="/10.png" alt="Bulk orders of tin-box packaging available" className="aspect-[16/9] h-full w-full object-contain md:aspect-auto" />
             </div>
-
-            {/* Special discounts promotion */}
             <div className="overflow-hidden rounded-2xl bg-[#005f2c] shadow-sm">
-              <img
-                src="/8.png"
-                alt="Special discounts available on bulk orders"
-                className="aspect-[4/3] h-full w-full object-contain md:aspect-auto"
-              />
+              <img src="/8.png" alt="Special discounts available on bulk orders" className="aspect-[4/3] h-full w-full object-contain md:aspect-auto" />
             </div>
-
-            {/* Christmas nativity poster */}
             <div className="overflow-hidden rounded-2xl bg-[#090428] shadow-sm">
-              <img
-                src="/9.png"
-                alt="Make this Christmas merrier, brighter and sweeter"
-                className="aspect-[4/3] h-full w-full object-contain md:aspect-auto"
-              />
+              <img src="/9.png" alt="Make this Christmas merrier, brighter and sweeter" className="aspect-[4/3] h-full w-full object-contain md:aspect-auto" />
             </div>
           </div>
         </section>
@@ -554,9 +561,9 @@ export default function StorefrontPage() {
                 className="rounded-xl border border-[#562400]/15 bg-[#FFFBE9] px-3 py-2 text-xs font-semibold text-[#562400] outline-none"
               >
                 <option value="all">All Shapes / Types</option>
-                <option value="Slice">Slice (400g)</option>
-                <option value="Round">Round (350g / 700g)</option>
-                <option value="Square">Square (500g)</option>
+                <option value="Slice">Slice</option>
+                <option value="Round">Round (Plum, Marble)</option>
+                <option value="Square">Square (Butterscotch, Pineapple)</option>
               </select>
 
               <select
@@ -565,7 +572,7 @@ export default function StorefrontPage() {
                 className="rounded-xl border border-[#562400]/15 bg-[#FFFBE9] px-3 py-2 text-xs font-semibold text-[#562400] outline-none"
               >
                 <option value="all">All Egg Types</option>
-                <option value="With Egg">With Egg</option>
+                <option value="Egg">Egg</option>
                 <option value="Eggless">Eggless</option>
               </select>
             </div>
@@ -598,10 +605,20 @@ export default function StorefrontPage() {
                       <div className="space-y-2">
                         {cake.filteredVariants.map((v) => {
                           const qty = cakeQtys[v.id] || 0;
+                          const isEggless = v.egg_type && v.egg_type.toLowerCase() === "eggless";
                           return (
                             <div key={v.id} className="flex items-center justify-between gap-3 rounded-xl border border-[#562400]/10 bg-[#FFFBE9]/75 px-3 py-2.5">
                               <div>
-                                <span className="block text-xs font-bold text-[#562400]">{v.weight}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="block text-xs font-bold text-[#562400]">{v.weight}</span>
+                                  {v.egg_type && (
+                                    <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                                      isEggless ? "bg-[#044529]/10 text-[#044529]" : "bg-[#8F0500]/10 text-[#8F0500]"
+                                    }`}>
+                                      {v.egg_type}
+                                    </span>
+                                  )}
+                                </div>
                                 <span className="text-[11px] tabular-nums text-[#562400]/65">MRP: ₹{v.mrp.toFixed(2)}</span>
                               </div>
                               <div className="flex items-center gap-2">
@@ -755,13 +772,12 @@ export default function StorefrontPage() {
                         </div>
                       </div>
 
-                      {/* UPI Payment Flow: App Selector for Mobile vs QR Code for PC */}
+                      {/* UPI Payment Flow */}
                       {paymentMode === "UPI" && totalCartAmount > 0 && (
                         <div className="space-y-3 rounded-2xl border border-[#562400]/15 bg-[#FFFBE9] p-4 text-center">
                           <p className="text-xs font-bold text-[#044529] uppercase tracking-wider">UPI Payment Details</p>
                           <p className="text-[11px] text-[#562400]/70">Payee: <strong className="text-[#562400]">Emmanuval Anthony</strong> (UPI ID: <code className="bg-[#FFECC5] px-1.5 py-0.5 rounded text-[#8F0500]">emmanuvalanthony2@oksbi</code>)</p>
 
-                          {/* Desktop / PC QR Code Display */}
                           <div className="my-3 hidden sm:flex flex-col items-center justify-center space-y-2">
                             <div className="rounded-xl bg-white p-3 shadow-sm border border-[#562400]/10">
                               <img
@@ -775,7 +791,6 @@ export default function StorefrontPage() {
                             <p className="text-[10px] text-[#562400]/60">Scan with GPay, PhonePe, Paytm or any UPI app on PC</p>
                           </div>
 
-                          {/* Mobile App Selector Buttons */}
                           <div className="space-y-2 pt-1 sm:hidden">
                             <p className="text-[10px] font-bold uppercase text-[#562400]/70">Tap to pay with your phone app:</p>
                             <div className="grid grid-cols-2 gap-2">
@@ -796,7 +811,6 @@ export default function StorefrontPage() {
                             </div>
                           </div>
 
-                          {/* Upload Screenshot Input (Mandatory for UPI) */}
                           <div className="mt-4 pt-3 border-t border-[#562400]/10 text-left">
                             <label className="block text-[10px] font-bold uppercase tracking-[0.14em] text-[#562400] mb-1.5">
                               <Upload className="inline h-3.5 w-3.5 mr-1 text-[#044529]" /> Upload Payment Screenshot * <span className="text-[#8F0500]">(Required)</span>
@@ -818,31 +832,64 @@ export default function StorefrontPage() {
                       )}
 
                       {/* Delivery Batch Selector */}
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[#562400]">
                           <Calendar className="h-4 w-4 text-[#044529]" /> Select delivery batch
                         </label>
-                        <select value={batchId} onChange={(e) => setBatchId(e.target.value)} className="w-full rounded-xl border border-[#562400]/15 bg-[#FFFBE9] p-3.5 text-sm text-[#562400] outline-none">
-                          {batches.map((b) => <option key={b.id} value={b.id}>{b.name} (Cutoff: {b.cutoff_date})</option>)}
-                        </select>
+                        <div className="grid grid-cols-2 gap-3">
+                          {batches.slice(0, 2).map((b, index) => (
+                            <button
+                              key={b.id}
+                              type="button"
+                              onClick={() => setBatchId(b.id)}
+                              aria-pressed={batchId === b.id}
+                              className={`relative flex min-h-[88px] flex-col items-start justify-center rounded-xl border p-4 text-left transition-all ${
+                                batchId === b.id
+                                  ? "border-[#044529] bg-[#044529] text-[#FFFBE9] shadow-sm"
+                                  : "border-[#562400]/15 bg-[#FFFBE9] text-[#562400] hover:border-[#044529]/50 hover:bg-[#FFECC5]/50"
+                              }`}
+                            >
+                              <span className="text-xs font-bold uppercase tracking-wider">{b.name}</span>
+                              <span className={`mt-2 text-[10px] ${batchId === b.id ? "text-[#FFFBE9]/80" : "text-[#562400]/60"}`}>
+                                Cutoff: {b.cutoff_date}
+                              </span>
+                              {batchId === b.id && (
+                                <Check className="absolute right-3 top-3 h-4 w-4" />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                        {batches.length === 0 && (
+                          <p className="text-xs text-[#8F0500]">No delivery batches are currently available.</p>
+                        )}
                       </div>
                     </div>
 
                     <div className="space-y-2 border-y border-[#562400]/10 py-4">
-                      {cartItems.map((item) => (
-                        <div key={item.variantId} className="flex items-center justify-between gap-3 rounded-xl bg-[#FFFBE9]/80 p-3">
-                          <div>
-                            <span className="block text-xs font-bold text-[#562400]">{item.cakeName}</span>
-                            <span className="mt-1 block text-[10px] text-[#562400]/60">{item.weight} × {item.quantity}</span>
+                      {cartItems.map((item) => {
+                        const isCartEggless = item.eggType && item.eggType.toLowerCase() === "eggless";
+                        return (
+                          <div key={item.variantId} className="flex items-center justify-between gap-3 rounded-xl bg-[#FFFBE9]/80 p-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="block text-xs font-bold text-[#562400]">{item.cakeName}</span>
+                                <span className={`rounded px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider ${
+                                  isCartEggless ? "bg-[#044529]/10 text-[#044529]" : "bg-[#8F0500]/10 text-[#8F0500]"
+                                }`}>
+                                  {item.eggType}
+                                </span>
+                              </div>
+                              <span className="mt-1 block text-[10px] text-[#562400]/60">{item.weight} × {item.quantity}</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs font-bold tabular-nums">₹{(item.mrp * item.quantity).toFixed(2)}</span>
+                              <button onClick={() => removeCartItem(item.variantId)} aria-label="Remove item" className="rounded-lg p-2 text-[#562400]/45 hover:bg-[#8F0500]/10 hover:text-[#8F0500]">
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-xs font-bold tabular-nums">₹{(item.mrp * item.quantity).toFixed(2)}</span>
-                            <button onClick={() => removeCartItem(item.variantId)} aria-label="Remove item" className="rounded-lg p-2 text-[#562400]/45 hover:bg-[#8F0500]/10 hover:text-[#8F0500]">
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                     <div className="flex items-center justify-between px-1">
                       <span className="text-xs font-bold uppercase tracking-wider">Total payable</span>
