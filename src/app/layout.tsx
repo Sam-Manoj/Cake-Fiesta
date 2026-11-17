@@ -15,7 +15,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Cake E-Commerce",
+  title: "Cake Fiesta",
   description: "Premium handcrafted cakes",
 };
 
