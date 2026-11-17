@@ -126,7 +126,7 @@ export default function AdminDashboard() {
     setCurrentAdminUser("");
   };
 
-  const fetchOrders = async () => {
+const fetchOrders = async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from("orders")
@@ -150,12 +150,17 @@ export default function AdminDashboard() {
 
     if (error) {
       console.error(error);
-    } else {
-      setOrders(data || []);
+    } else if (data) {
+      const formattedOrders = data.map((order: any) => ({
+        ...order,
+        customers: Array.isArray(order.customers) ? order.customers[0] : order.customers,
+        batches: Array.isArray(order.batches) ? order.batches[0] : order.batches,
+      }));
+      setOrders(formattedOrders);
     }
     setLoading(false);
   };
-
+  
   const handleViewScreenshot = async (orderId: string) => {
     setScreenshotLoading(true);
     try {
