@@ -596,7 +596,6 @@ export default function StorefrontPage() {
                       <h3 className="font-serif text-2xl font-bold leading-tight text-[#044529]">{cake.name}</h3>
                       <p className="mt-2 min-h-[40px] text-xs leading-5 text-[#562400]/70">{cake.description}</p>
                       <p className="mt-3 text-[10px] text-[#562400]/60">
-                        <span className="font-bold uppercase tracking-wider">Shelf life:</span> {cake.shelf_life}
                       </p>
                       <div className="my-5 h-px bg-[#562400]/10" />
                       <div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.13em] text-[#044529]">
