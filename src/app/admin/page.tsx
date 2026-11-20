@@ -20,6 +20,8 @@ interface Order {
   }[];
 }
 
+const ORDERS_PER_PAGE = 10;
+
 export default function AdminDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentAdminUser, setCurrentAdminUser] = useState("");
@@ -40,6 +42,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [filterBatch, setFilterBatch] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [profitEggFilter, setProfitEggFilter] = useState("all");
   const [profitTypeFilter, setProfitTypeFilter] = useState("all");
@@ -239,6 +242,25 @@ const fetchOrders = async () => {
     const matchesStatus = filterStatus === "all" || ord.status === filterStatus;
     return matchesBatch && matchesStatus;
   });
+
+  // Client-side pagination: display only 10 filtered orders at a time.
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PER_PAGE));
+  const paginatedOrders = filteredOrders.slice(
+    (currentPage - 1) * ORDERS_PER_PAGE,
+    currentPage * ORDERS_PER_PAGE
+  );
+
+  // Return to the first page whenever the batch or status filter changes.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterBatch, filterStatus]);
+
+  // Keep the current page valid if orders are removed or filters reduce results.
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const totalOrdersCount = filteredOrders.length;
   const totalStorefrontRevenue = filteredOrders.reduce((sum, o) => sum + (o.status !== 'cancelled' ? o.total_amount : 0), 0);
@@ -735,6 +757,7 @@ const fetchOrders = async () => {
           {filteredOrders.length === 0 ? (
             <p className="text-center text-[#562400]/60 py-12">No orders found matching the selected filters.</p>
           ) : (
+            <>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-sm">
                 <thead>
@@ -749,7 +772,7 @@ const fetchOrders = async () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#562400]/10">
-                  {filteredOrders.map((ord) => (
+                  {paginatedOrders.map((ord) => (
                     <tr key={ord.id} className="hover:bg-[#FFECC5]/20 transition-colors">
                       <td className="p-3.5 font-mono text-xs">
                         <span className="font-semibold">{ord.id.slice(0, 8)}</span>
@@ -846,6 +869,42 @@ const fetchOrders = async () => {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Controls */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-[#562400]/10 pt-5">
+              <p className="text-xs text-[#562400]/60">
+                Showing{" "}
+                {filteredOrders.length === 0 ? 0 : (currentPage - 1) * ORDERS_PER_PAGE + 1}
+                {" "}to{" "}
+                {Math.min(currentPage * ORDERS_PER_PAGE, filteredOrders.length)}
+                {" "}of {filteredOrders.length} orders
+              </p>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                  disabled={currentPage === 1}
+                  className="px-4 py-2 rounded-lg border border-[#562400]/15 text-xs font-semibold text-[#562400] hover:bg-[#FFECC5] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  Previous
+                </button>
+
+                <span className="text-xs font-semibold text-[#562400] whitespace-nowrap">
+                  Page {currentPage} of {totalPages}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                  disabled={currentPage >= totalPages}
+                  className="px-4 py-2 rounded-lg bg-[#044529] text-xs font-semibold text-[#FFFBE9] hover:bg-[#033620] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+            </>
           )}
         </div>
       </main>
