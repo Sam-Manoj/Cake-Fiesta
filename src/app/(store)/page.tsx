@@ -407,7 +407,7 @@ export default function StorefrontPage() {
               CAKE FIESTA
             </span>
             <span className="mt-1.5 hidden whitespace-nowrap text-[7px] font-semibold uppercase tracking-[0.2em] text-[#562400] min-[380px]:block sm:text-[8px] sm:tracking-[0.34em]">
-              Altar Angels · Christmas 2026
+              SHC Altar Angels · Christmas 2026
             </span>
           </a>
 
@@ -914,7 +914,7 @@ export default function StorefrontPage() {
         <div className="mx-auto grid max-w-[1400px] gap-8 md:grid-cols-[1.2fr_1fr_1fr] md:items-end">
           <div>
             <p className="font-serif text-3xl font-black tracking-[-0.04em]">CAKE FIESTA</p>
-            <p className="mt-2 text-[9px] font-semibold uppercase tracking-[0.2em] text-[#FFECC5]">Altar Angels · Christmas 2026</p>
+            <p className="mt-2 text-[9px] font-semibold uppercase tracking-[0.2em] text-[#FFECC5]">Sacred Heart Church Bhayandar Altar Angels · Christmas 2026</p>
           </div>
         </div>
       </footer>
