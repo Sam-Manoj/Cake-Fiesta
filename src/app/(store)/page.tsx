@@ -572,7 +572,7 @@ export default function StorefrontPage() {
                 className="rounded-xl border border-[#562400]/15 bg-[#FFFBE9] px-3 py-2 text-xs font-semibold text-[#562400] outline-none"
               >
                 <option value="all">All Egg Types</option>
-                <option value="Egg">Egg</option>
+                <option value="With Egg">With Egg</option>
                 <option value="Eggless">Eggless</option>
               </select>
             </div>
